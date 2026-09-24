@@ -69,6 +69,7 @@ You can omit everything. Defaults work for ordinary sessions, and if `model` is 
 | `model.thinking` | enum | unset; workers fall back to `low` | Optional reasoning/thinking level for memory workers. |
 | `compactionSummaryMaxTokens` | positive integer | derived | Estimated token budget for the memory summary the compaction hook renders. Unset: one eighth of the session model's context window, or `8000` when unknown. Observations get at least half (newest first); reflections take the rest. |
 | `compactionCatchUpMaxChunks` | non-negative integer | `2` | Observer chunks the compaction hook may run synchronously to cover source entries the background observer has not reached before Pi's cut. `0` disables. |
+| `workerMemoryMaxTokens` | positive integer | derived | Estimated token budget for the prior memory each observer, reflector, and dropper request carries. Unset: a quarter of the memory model's context window, or `16000` when unknown. |
 | `consolidateWhenIdle` | boolean | `false` | Run memory workers only while the agent is idle (launch from `agent_settled`, abort when a new agent run starts). For hosts where the session model and the memory model share one context budget. |
 | `showWorkerNotifications` | boolean | `true` | Shows routine observer, reflector, and dropper progress notifications. |
 | `passive` | boolean | `false` | Disables proactive background memory and auto-compaction triggers. |
@@ -202,6 +203,12 @@ Default: `2`. Set `0` to disable.
 When the background observer is behind Pi's proposed cut, the hook used to either retain the unobserved tail or delegate the whole range to Pi's native summarizer. Both cost headroom: retaining keeps raw source in context, and a native summary is prose that Pi rewrites and grows on every compaction (12k tokens after a hundred rounds on a local model) and that can hit the model's output cap. Instead, when observation coverage exists, the hook now observes the gap synchronously, up to this many observer chunks, appending coverage for each recorded chunk, and then re-resolves the cut, usually landing on Pi's proposed boundary with a bounded summary.
 
 This runs inside `session_before_compact`, where Pi waits for the hook and no session request is in flight, so the memory model does not compete with the session even when both share one server. A chunk that records nothing, fails, or is aborted stops the catch-up; the remaining gap is retained or delegated as before, and nothing is appended for a failed chunk. Catch-up is skipped while a background consolidation run is in flight and when the ledger has no observation coverage at all, so an empty memory still delegates to Pi's native summarizer without a model call.
+
+## `workerMemoryMaxTokens`
+
+Default: derived — `floor(contextWindow / 4)` of the resolved memory model, or `16000` when the context window is unknown.
+
+Each observer, reflector, and dropper request carries prior memory so the worker does not repeat itself and can relate new material to old. The ledger grows without limit on long sessions (107 reflections and 121 active observations, about 45k tokens, on one multi-day session), and sending all of it made every worker request exceed a 64k window, which in turn kept the dropper from ever shrinking the ledger. Worker prompts now carry a bounded slice: observations get at least half the budget and reflections the rest, newest first, each side reclaiming what the other leaves. The dropper receives the oldest observations that fit instead, since pruning old records is its job. With the observer chunk capped at a fifth of the window and `agentMaxTokens` as the output reservation, a worker request stays inside the window.
 
 ## `consolidateWhenIdle`
 

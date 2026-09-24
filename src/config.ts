@@ -63,6 +63,12 @@ export interface Config {
 	 * summarizer. 0 disables synchronous catch-up.
 	 */
 	compactionCatchUpMaxChunks: number;
+	/**
+	 * Estimated token budget for the prior memory (reflections and observations)
+	 * carried by each observer, reflector, and dropper request. Unset derives it
+	 * from the memory model's context window; see {@link resolveWorkerMemoryMaxTokens}.
+	 */
+	workerMemoryMaxTokens?: number;
 	observationsPoolMaxTokens: number;
 	observationsPoolTargetTokens: number;
 	agentMaxTurns: number;
@@ -178,6 +184,27 @@ export function resolveCompactionSummaryMaxTokens(config: Config, contextWindow:
 	return COMPACTION_SUMMARY_FALLBACK_MAX_TOKENS;
 }
 
+/** Worker prior-memory budget used when unset and the memory model's context window is unknown. */
+export const WORKER_MEMORY_FALLBACK_MAX_TOKENS = 16_000;
+
+/** Fraction of the memory model's context window worker prompts may spend on prior memory. */
+export const WORKER_MEMORY_CONTEXT_RATIO = 0.25;
+
+/**
+ * Resolve the prior-memory budget for worker prompts. Explicit
+ * `workerMemoryMaxTokens` wins; otherwise a quarter of the memory model's
+ * context window, or {@link WORKER_MEMORY_FALLBACK_MAX_TOKENS} when unknown.
+ * Together with the observer chunk cap (a fifth of the window) and the output
+ * reservation this keeps a worker request inside the window.
+ */
+export function resolveWorkerMemoryMaxTokens(config: Config, contextWindow: number | undefined): number {
+	if (config.workerMemoryMaxTokens !== undefined && config.workerMemoryMaxTokens > 0) return config.workerMemoryMaxTokens;
+	if (typeof contextWindow === "number" && Number.isFinite(contextWindow) && contextWindow > 0) {
+		return Math.max(1, Math.floor(contextWindow * WORKER_MEMORY_CONTEXT_RATIO));
+	}
+	return WORKER_MEMORY_FALLBACK_MAX_TOKENS;
+}
+
 export const THINKING_LEVEL_VALUES: readonly ModelThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 
 /** Observer chunk cap used when no config is set and the model's context window is unknown. */
@@ -282,6 +309,7 @@ function normalizeSettingsConfig(value: Record<string, unknown>): Partial<Config
 		"compactAfterTokens",
 		"compactionMaxRetainedTokens",
 		"compactionSummaryMaxTokens",
+		"workerMemoryMaxTokens",
 		"observationsPoolMaxTokens",
 		"observationsPoolTargetTokens",
 		"agentMaxTurns",

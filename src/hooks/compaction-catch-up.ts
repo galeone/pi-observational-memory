@@ -1,12 +1,13 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 import { runObserver } from "../agents/observer/agent.js";
-import { resolveObserverChunkMaxTokens } from "../config.js";
+import { resolveObserverChunkMaxTokens, resolveWorkerMemoryMaxTokens } from "../config.js";
 import { debugLog } from "../debug-log.js";
 import type { Runtime } from "../runtime.js";
 import { serializeSourceAddressedBranchEntries } from "../serialize.js";
 import {
 	OM_OBSERVATIONS_RECORDED,
+	boundWorkerMemory,
 	buildObservationsRecordedData,
 	fullProjection,
 	isSourceEntry,
@@ -71,7 +72,8 @@ export async function catchUpObserver(args: CatchUpArgs): Promise<CatchUpResult>
 		const coversUpToId = sourceEntryIds.at(-1);
 		if (!chunk.trim() || !coversUpToId) break;
 
-		const memory = fullProjection(branch);
+		const fullMemory = fullProjection(branch);
+		const memory = boundWorkerMemory(fullMemory.reflections, fullMemory.observations, resolveWorkerMemoryMaxTokens(runtime.config, contextWindow));
 		if (runtime.config.showWorkerNotifications && ctx.hasUI) {
 			ctx.ui.notify(
 				`Observational memory: observing ${sourceEntryIds.length} unobserved source entr${sourceEntryIds.length === 1 ? "y" : "ies"} (~${estimatedTokens.toLocaleString()} tokens) before compacting`,

@@ -289,6 +289,7 @@ on the `Next compaction` line regardless of mode.
 | `model`                     | session model | Optional memory-worker model override: `{ provider, id, thinking }`.                              |
 | `compactionSummaryMaxTokens` | derived      | Token budget for the rendered memory summary (observations get at least half, newest first; reflections the rest). Unset: one eighth of the session model's context window, or `8000`. |
 | `compactionCatchUpMaxChunks` | `2`          | Observer chunks the compaction hook runs synchronously to cover unobserved source before Pi's cut, so it can own the compaction instead of delegating. `0` disables. |
+| `workerMemoryMaxTokens`     | derived       | Token budget for the prior memory each memory-worker request carries (newest first; the dropper sees the oldest observations). Unset: a quarter of the memory model's context window, or `16000`. |
 | `consolidateWhenIdle`       | `false`       | Run memory workers only while the agent is idle and abort them when a new run starts. Use when the session model and the memory model share one context budget (e.g. one local llama.cpp server). |
 | `showWorkerNotifications`   | `true`        | Shows routine observer, reflector, and dropper progress notifications. Warnings and errors are unaffected. |
 | `passive`                   | `false`       | Disables proactive background observation, reflection, maintenance, and auto-compaction triggers. |

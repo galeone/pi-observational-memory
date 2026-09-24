@@ -48,6 +48,7 @@ function setup(args: {
 	observerChunkMaxTokens?: number;
 	observationsPoolMaxTokens?: number;
 	observationsPoolTargetTokens?: number;
+	workerMemoryMaxTokens?: number;
 	showWorkerNotifications?: boolean;
 	passive?: boolean;
 	consolidationInFlight?: boolean;
@@ -80,6 +81,7 @@ function setup(args: {
 			observeAfterTokens: args.observeAfterTokens ?? 1,
 			reflectAfterTokens: args.reflectAfterTokens ?? 1,
 			observerChunkMaxTokens: args.observerChunkMaxTokens,
+			workerMemoryMaxTokens: args.workerMemoryMaxTokens,
 			observationsPoolMaxTokens: args.observationsPoolMaxTokens ?? 100,
 			observationsPoolTargetTokens: args.observationsPoolTargetTokens ?? Math.floor((args.observationsPoolMaxTokens ?? 100) / 2),
 			agentMaxTurns: 9,
@@ -1006,5 +1008,25 @@ describe("consolidateWhenIdle", () => {
 		});
 		idle.fireAgentSettled();
 		expect(afterIdleConsolidation).toHaveBeenCalledTimes(2);
+	});
+});
+
+describe("bounded worker memory in consolidation", () => {
+	it("sends the observer only the newest prior memory that fits workerMemoryMaxTokens", async () => {
+		const old = [1, 2, 3].map((i) => observation(`a${i}`.padEnd(12, "a"), { sourceEntryIds: [`raw-${i}`], content: `Old ${"o".repeat(120)}` }));
+		const entries = [
+			textCustomMessage("raw-1", "a"), textCustomMessage("raw-2", "b"), textCustomMessage("raw-3", "c"),
+			observationsRecordedEntry("om-obs", { observations: old, coversUpToId: "raw-3" }),
+			textCustomMessage("raw-4", "dddddddd"),
+		];
+		mockAgents.runObserver.mockResolvedValueOnce([observation("cccccccccccc", { sourceEntryIds: ["raw-4"] })]);
+		const { fire, runLaunchedWork } = setup({ entries, reflectAfterTokens: 999, workerMemoryMaxTokens: 50 });
+
+		fire();
+		await runLaunchedWork();
+
+		const args = mockAgents.runObserver.mock.calls[0][0];
+		expect(args.priorObservations).toHaveLength(1);
+		expect(args.priorObservations[0]).toContain("[a3aaaaaaaaaa]");
 	});
 });

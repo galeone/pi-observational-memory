@@ -4,7 +4,7 @@ import { observationPoolMetrics } from "../agents/dropper/pool.js";
 import { ObserverStreamError, runObserver } from "../agents/observer/agent.js";
 import { runReflector } from "../agents/reflector/agent.js";
 import { debugLog, withDebugLogContext } from "../debug-log.js";
-import { resolveObserverChunkMaxTokens } from "../config.js";
+import { resolveObserverChunkMaxTokens, resolveWorkerMemoryMaxTokens } from "../config.js";
 import type { ResolveResult, Runtime } from "../runtime.js";
 import { serializeSourceAddressedBranchEntries } from "../serialize.js";
 import {
@@ -13,6 +13,7 @@ import {
 	OM_REFLECTIONS_RECORDED,
 	buildObservationsDroppedData,
 	buildObservationsRecordedData,
+	boundWorkerMemory,
 	buildReflectionsRecordedData,
 	earlierCoverageMarkerId,
 	foldLedger,
@@ -372,7 +373,8 @@ async function runObserverStage(
 		});
 	}
 
-	const memory = fullProjection(entries);
+	const fullMemory = fullProjection(entries);
+	const memory = boundWorkerMemory(fullMemory.reflections, fullMemory.observations, resolveWorkerMemoryMaxTokens(runtime.config, contextWindow));
 	const priorReflections = memory.reflections.map(reflectionToSummaryLine);
 	const priorObservations = memory.observations.map(observationToSummaryLine);
 
@@ -388,6 +390,8 @@ async function runObserverStage(
 		sourceEntryCount: sourceEntryIds.length,
 		priorReflections: priorReflections.length,
 		priorObservations: priorObservations.length,
+		omittedReflections: memory.omittedReflections,
+		omittedObservations: memory.omittedObservations,
 	});
 
 	let observations: Observation[] | undefined;
@@ -478,13 +482,18 @@ async function runReflectorStage(
 	}
 
 	const folded = foldLedger(entries);
+	const reflectorMemory = boundWorkerMemory(
+		folded.reflections,
+		folded.activeObservations,
+		resolveWorkerMemoryMaxTokens(runtime.config, (resolved.model as { contextWindow?: number }).contextWindow),
+	);
 	const reflections = await runReflector({
 		model: resolved.model as any,
 		apiKey: resolved.apiKey,
 		headers: resolved.headers,
 		env: resolved.env,
-		reflections: folded.reflections,
-		observations: folded.activeObservations,
+		reflections: reflectorMemory.reflections,
+		observations: reflectorMemory.observations,
 		maxTurns: runtime.config.agentMaxTurns,
 		maxOutputTokens: runtime.config.agentMaxTokens,
 		signal: consolidationSignal(runtime),
@@ -562,13 +571,20 @@ async function runDropperStage(
 	}
 
 	const reflectionsForDropper = mergeReflections(folded.reflections, sameRunReflections);
+	// The dropper prunes old observations, so it sees the oldest ones that fit.
+	const dropperMemory = boundWorkerMemory(
+		reflectionsForDropper,
+		folded.activeObservations,
+		resolveWorkerMemoryMaxTokens(runtime.config, (resolved.model as { contextWindow?: number }).contextWindow),
+		{ observationsFrom: "oldest" },
+	);
 	const droppedIds = await runDropper({
 		model: resolved.model as any,
 		apiKey: resolved.apiKey,
 		headers: resolved.headers,
 		env: resolved.env,
-		reflections: reflectionsForDropper,
-		observations: folded.activeObservations,
+		reflections: dropperMemory.reflections,
+		observations: dropperMemory.observations,
 		targetTokens: runtime.config.observationsPoolTargetTokens,
 		maxTurns: runtime.config.agentMaxTurns,
 		maxOutputTokens: runtime.config.agentMaxTokens,
